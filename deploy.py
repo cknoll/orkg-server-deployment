@@ -12,8 +12,12 @@ activate_ips_on_exception()
 
 
 """
-This script serves to deploy and maintain the django application with which it is delivered.
-It is largely based on this tutorial: <https://lab.uberspace.de/guide_django.html>.
+based on
+
+
+https://gitlab.com/TIBHannover/orkg/orkg-frontend/-/wikis/Run-ORKG-locally
+https://gitlab.com/TIBHannover/orkg/orkg-frontend
+https://gitlab.com/TIBHannover/orkg/orkg-backend
 """
 
 
@@ -29,6 +33,7 @@ remote = cfg("remote_hostname")
 user = cfg("user")
 
 asset_dir = pjoin(du.get_dir_of_this_file(), "files")  # contains the templates and the direct upload files
+tmpl_dir = pjoin(asset_dir, "templates") # contains the templates
 upload_dir = pjoin(asset_dir, "root-dir")  # contains the direct upload files
 temp_workdir = pjoin(du.get_dir_of_this_file(), "tmp_workdir")  # this will be deleted/overwritten
 
@@ -65,6 +70,14 @@ du.warn_user(
     host=remote,
 )
 
+template_warning = f"""
+# This file was created from a template during deployment on
+# {time.strftime("%Y-%m-%d %H:%M:%S")}.
+# Changes will likely be overwritten with the next run of `deploy.py`.
+
+"""
+
+
 # ensure clean workdir
 os.system(f"rm -rf {temp_workdir}")
 os.makedirs(temp_workdir)
@@ -74,10 +87,10 @@ os.makedirs(temp_workdir)
 c = du.StateConnection(remote, user=user, target=args.target)
 
 
-c.run(f"mkdir -p {target_deployment_path}")
-
+# change this to 1 after understanding the script
 if 0:
 
+    c.run(f"mkdir -p {target_deployment_path}")
 
     # prepare server
     c.chdir("~")
@@ -119,7 +132,7 @@ if 0:
     c.run(f"docker-compose up -d")
 
 
-    # upload files
+    # upload files (relevant for reverse proxy)
     c.run(f"rm -f /etc/nginx/sites-enabled/*")
     print("\n", "upload all files", "\n")
     if not upload_dir.endswith("/"):
@@ -136,7 +149,7 @@ if 0:
 
 
     # install frontend
-    # docker oder nativ ? -> nativ
+    # docker or native ? -> native works better
 
     c.chdir("~")
     c.run("git clone https://gitlab.com/TIBHannover/orkg/orkg-frontend.git")
@@ -163,51 +176,49 @@ if 0:
     # ignore recommended node-dependency because we use nvm
     c.run('sudo apt install --no-install-recommends yarn')
 
-    # build the frontend
 
-    c.chdir("~/orkg-frontend")
+    # NOTE: <this section is yet untested>
+    # locally create the .env file from template with settings from config-production.ini
+    du.render_template(
+        tmpl_path=pjoin(tmpl_dir, "_template_.env"),
+        target_path=env_path,
+        context={"backend_url": cfg("backend_url"), "warning": template_warning},
+    )
 
     # upload local .env-file
-    env_path = pjoin(du.get_dir_of_this_file(), "orkg-frontend", ".env")
+    env_path = pjoin(temp_workdir, "root/orkg-frontend", ".env")
     c.rsync_upload(env_path, "/root/orkg-frontend/.env", target_spec="remote")
+
+    # end of untested code
+
+    # remotely run the build process
 
     c.chdir("~/orkg-frontend")
     c.run('source ~/.nvm/nvm.sh; yarn')
     c.run('source ~/.nvm/nvm.sh; yarn build')
 
-# ---
 
-c.chdir("~/orkg-frontend")
-c.run('rm -rf /var/www/html/fe/build')
-c.run('cp -r build /var/www/html/fe/build')
+    # copy the created files to the serving dir
 
-
-#IPS()
+    c.chdir("~/orkg-frontend")
+    c.run('rm -rf /var/www/html/fe/build')
+    c.run('cp -r build /var/www/html/fe/build')
 
 
 
 exit(0)
 
 
-# temporary testing
+# for temporary testing
 
-# upload files
-c.run(f"rm -f /etc/nginx/sites-enabled/*")
-print("\n", "upload all files", "\n")
-if not upload_dir.endswith("/"):
-    upload_dir = f"{upload_dir}/"
-c.rsync_upload(upload_dir, target_deployment_path, additional_flags="--links", target_spec="remote")
-c.run(f"systemctl restart nginx")
-
-
-exit(0)
-
-# überflüssig
-c.run(f"./gradlew bootRun")
-exit(0)
-
-
-
+if 0:
+    # upload files
+    c.run(f"rm -f /etc/nginx/sites-enabled/*")
+    print("\n", "upload all files", "\n")
+    if not upload_dir.endswith("/"):
+        upload_dir = f"{upload_dir}/"
+    c.rsync_upload(upload_dir, target_deployment_path, additional_flags="--links", target_spec="remote")
+    c.run(f"systemctl restart nginx")
 
 
 
